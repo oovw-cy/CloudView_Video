@@ -1,0 +1,72 @@
+server:
+  port: 10010
+  servlet:
+    context-path: /api
+
+spring:
+  application:
+    name: GateWay
+  main:
+    web-application-type: reactive
+  data:
+    redis:
+      database: 15
+      host: 127.0.0.1
+      port: 6380
+      timeout: 50000
+      password: xxxxxx
+      # ?? redis ???
+      lettuce:
+        pool:
+          # ??????????? ??? 0
+          min-idle: 4
+          # ??????????? ??? 8
+          max-idle: 8
+          #???????????? ??? 8
+          max-active: 8
+          #???????????
+          max-wait: 5000ms
+
+  cloud:
+    nacos:
+      discovery:
+        server-addr: 127.0.0.1:8848
+    gateway:
+      server:
+        webflux:
+          httpclient:
+            connect-timeout: 60000
+            response-timeout: 60000
+          globalcors:
+            add-to-simple-url-handler-mapping: true
+            cors-configurations:
+              '[/**]':
+                allowedOrigins:
+                  - "http://localhost:10010"
+                allowedMethods:
+                  - "GET"
+                  - "POST"
+                  - "PUT"
+                  - "DELETE"
+                  - "PATCH"
+                  - "OPTIONS"
+                allowedHeaders: "*"
+                allowCredentials: true
+                maxAge: 36000
+          routes:
+            - id: UserService
+              uri: lb://UserService
+              predicates:
+                - Path=/api/user/**
+            - id: VideoActionService
+              uri: lb://VideoActionService
+              predicates:
+                - Path=/api/video/**
+            - id: VideoActionService
+              uri: lb://VideoActionService
+              predicates:
+                - Path=/api/video/**
+            - id: SearchSyncService
+              uri: lb://SearchSyncService
+              predicates:
+                - Path=/api/search/**

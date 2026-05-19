@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper
+        PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.shanyangcode.videoactionservice.mapper.VideoStatsMapper">
+
+    <resultMap id="BaseResultMap" type="com.shanyangcode.videoactionservice.model.entity.VideoStats">
+            <id property="videoId" column="video_id" />
+            <result property="viewCount" column="view_count" />
+            <result property="bulletCount" column="bullet_count" />
+            <result property="likeCount" column="like_count" />
+            <result property="coinCount" column="coin_count" />
+            <result property="favoriteCount" column="favorite_count" />
+            <result property="commentCount" column="comment_count" />
+            <result property="createTime" column="create_time" />
+            <result property="updateTime" column="update_time" />
+            <result property="isDelete" column="is_delete" />
+    </resultMap>
+
+    <sql id="Base_Column_List">
+        video_id,view_count,bullet_count,like_count,coin_count,collection_count,
+        comment_count,create_time,update_time,is_delete
+    </sql>
+</mapper>

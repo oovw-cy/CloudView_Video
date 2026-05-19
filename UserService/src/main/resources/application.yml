@@ -1,0 +1,35 @@
+server:
+  port: 8102
+  servlet:
+    context-path: /api
+
+spring:
+  application:
+    name: UserService
+  cloud:
+    nacos:
+      discovery:
+        server-addr: 127.0.0.1:8848
+  datasource:
+    driver-class-name: com.mysql.cj.jdbc.Driver
+    url: jdbc:mysql://127.0.0.1:3306/tianmu?useUnicode=true&characterEncoding=UTF-8&serverTimezone=Asia/Shanghai
+    username: root
+    password: xxxx
+  data:
+    redis:
+      database: 15
+      host: 127.0.0.1
+      port: 6379
+      timeout: 50000
+      password: xxxxx
+      # ?? redis ???
+      lettuce:
+        pool:
+          # ??????????? ??? 0
+          min-idle: 4
+          # ??????????? ??? 8
+          max-idle: 8
+          #???????????? ??? 8
+          max-active: 8
+          #???????????
+          max-wait: 5000ms

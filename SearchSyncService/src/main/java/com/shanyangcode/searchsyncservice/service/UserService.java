@@ -1,0 +1,10 @@
+package com.shanyangcode.searchsyncservice.service;
+
+import com.baomidou.mybatisplus.extension.service.IService;
+
+import com.shanyangcode.searchsyncservice.model.entity.User;
+
+
+public interface UserService extends IService<User> {
+
+}

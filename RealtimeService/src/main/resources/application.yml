@@ -1,0 +1,37 @@
+server:
+  port: 8100
+  servlet:
+    context-path: /api
+
+spring:
+  application:
+    name: RealtimeService
+  cloud:
+    nacos:
+      discovery:
+        server-addr: 127.0.0.1:8848
+  data:
+    redis:
+      database: 15
+      host: 127.0.0.1
+      port: 6380
+      timeout: 50000
+      password: xxxxx
+      lettuce:
+        pool:
+          min-idle: 4
+          max-idle: 8
+          max-active: 8
+          max-wait: 5000ms
+
+
+rocketmq:
+  name-server: 127.0.0.1:9876
+  producer:
+    group: zzz-producer-group
+  consumer:
+    group: zzz-consumer-group
+
+
+netty:
+  port: 9101

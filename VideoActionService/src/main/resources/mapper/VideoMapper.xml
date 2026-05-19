@@ -1,0 +1,142 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper
+        PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.shanyangcode.videoactionservice.mapper.VideoMapper">
+
+    <resultMap id="BaseResultMap" type="com.shanyangcode.videoactionservice.model.entity.Video">
+            <id property="videoId" column="video_id" />
+            <result property="fileUrl" column="file_url" />
+            <result property="coverUrl" column="cover_url" />
+            <result property="userId" column="user_id" />
+            <result property="title" column="title" />
+            <result property="type" column="type" />
+            <result property="duration" column="duration" />
+            <result property="categoryId" column="category_id" />
+            <result property="tags" column="tags" />
+            <result property="description" column="description" />
+            <result property="status" column="status" />
+            <result property="createTime" column="create_time" />
+            <result property="updateTime" column="update_time" />
+            <result property="isDelete" column="is_delete" />
+    </resultMap>
+
+    <select id="selectVideoWithStats" resultType="com.shanyangcode.videoactionservice.model.vo.VideoListResponse">
+        SELECT v.video_id, vs.view_count, vs.bullet_count, v.user_id,
+        v.file_url, v.cover_url, v.duration,
+        v.title, v.create_time, u.nickname
+        FROM video v
+        LEFT JOIN video_stats vs ON v.video_id = vs.video_id
+        LEFT JOIN `user` u ON v.user_id = u.user_id
+        WHERE v.is_delete = 0
+        ORDER BY v.create_time ASC  <!-- 建议添加排序 -->
+        LIMIT #{current}, #{pageSize}
+    </select>
+
+    <select id="recommendVideoList" resultType="com.shanyangcode.videoactionservice.model.vo.VideoListResponse">
+        SELECT v.video_id, vs.view_count, vs.bullet_count, v.user_id,
+               v.file_url, v.cover_url, v.duration,
+               v.title, v.create_time, u.nickname
+        FROM video v
+                 LEFT JOIN video_stats vs ON v.video_id = vs.video_id
+                 LEFT JOIN `user` u ON v.user_id = u.user_id
+        WHERE v.is_delete = 0 and v.category_id = #{categoryId} and v.video_id != #{videoId}
+    </select>
+
+
+    <select id="getVideoDetails" resultType="com.shanyangcode.videoactionservice.model.vo.VideoDetailsResponse">
+        SELECT
+            v.video_id,
+            v.file_url,
+            v.user_id,
+            v.title,
+            v.type,
+            v.duration,
+            v.tags,
+            v.description,
+            v.create_time,
+            vs.view_count,
+            vs.bullet_count,
+            vs.like_count,
+            vs.coin_count,
+            vs.favorite_count,
+            vs.comment_count,
+            u.nickname,
+            u.avatar
+        FROM video v
+                 LEFT JOIN video_stats vs ON v.video_id = vs.video_id
+                 LEFT JOIN `user` u ON v.user_id = u.user_id
+        WHERE v.video_id = #{videoId}
+          AND v.is_delete = 0
+          AND u.is_delete = 0
+          AND v.status = 2;
+    </select>
+
+    <select id="getSubmitVideoList" resultType="com.shanyangcode.videoactionservice.model.vo.VideoListResponse">
+        SELECT v.video_id, vs.view_count, vs.bullet_count, v.user_id,
+               v.file_url, v.cover_url, v.duration,
+               v.title, v.create_time, u.nickname
+        FROM video v
+                 LEFT JOIN video_stats vs ON v.video_id = vs.video_id
+                 LEFT JOIN `user` u ON v.user_id = u.user_id
+        WHERE v.is_delete = 0 and v.user_id = #{userId}
+    </select>
+
+    <select id="getCategoryVideoList" resultType="com.shanyangcode.videoactionservice.model.vo.VideoListResponse">
+        SELECT v.video_id, vs.view_count, vs.bullet_count, v.user_id,
+               v.file_url, v.cover_url, v.duration,
+               v.title, v.create_time, u.nickname
+        FROM video v
+                 LEFT JOIN video_stats vs ON v.video_id = vs.video_id
+                 LEFT JOIN `user` u ON v.user_id = u.user_id
+        WHERE v.is_delete = 0 and v.category_id = #{categoryId}
+    </select>
+
+    <select id="getLikeVideoList" resultType="com.shanyangcode.videoactionservice.model.vo.VideoListResponse">
+        SELECT v.video_id, vs.view_count, vs.bullet_count, v.user_id,
+               v.file_url, v.cover_url, v.duration,
+               v.title, v.create_time, u.nickname
+        FROM video v
+                 LEFT JOIN video_stats vs ON v.video_id = vs.video_id
+                 LEFT JOIN `user` u ON v.user_id = u.user_id
+                 LEFT JOIN `like` lv ON v.video_id = lv.video_id
+        WHERE v.is_delete = 0 and lv.user_id = #{userId}
+    </select>
+
+
+
+    <select id="getCoinVideoList" resultType="com.shanyangcode.videoactionservice.model.vo.VideoListResponse">
+        SELECT v.video_id, vs.view_count, vs.bullet_count, v.user_id,
+               v.file_url, v.cover_url, v.duration,
+               v.title, v.create_time, u.nickname
+        FROM video v
+                 LEFT JOIN video_stats vs ON v.video_id = vs.video_id
+                 LEFT JOIN `user` u ON v.user_id = u.user_id
+                 LEFT JOIN coin cv ON v.video_id = cv.video_id
+        WHERE v.is_delete = 0 and cv.user_id = #{userId}
+    </select>
+
+
+
+    <select id="getFavoriteVideoList" resultType="com.shanyangcode.videoactionservice.model.vo.FavoriteVideoResponse">
+        SELECT
+            v.video_id, vs.view_count, vs.bullet_count, v.user_id,
+            v.file_url, v.cover_url, v.duration,
+            v.title, v.create_time, u.nickname,
+            fv.create_time AS favorite_time  -- 新增收藏时间字段
+        FROM video v
+                 LEFT JOIN video_stats vs ON v.video_id = vs.video_id
+                 LEFT JOIN `user` u ON v.user_id = u.user_id
+                 LEFT JOIN favorite fv ON v.video_id = fv.video_id  -- 新增关联收藏表
+        WHERE
+            v.is_delete = 0 and fv.user_id = #{userId}
+        ORDER BY
+            fv.create_time DESC;  -- 主查询排序
+    </select>
+
+    <sql id="Base_Column_List">
+        video_id,file_url,cover_url,user_id,title,type,
+        duration,category_id,tags,description,status,
+        create_time,update_time,is_delete
+    </sql>
+</mapper>

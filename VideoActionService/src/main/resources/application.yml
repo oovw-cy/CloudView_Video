@@ -1,0 +1,50 @@
+server:
+  port: 8103
+  servlet:
+    context-path: /api
+
+
+spring:
+  application:
+    name: VideoActionService
+  cloud:
+    nacos:
+      discovery:
+        server-addr: 127.0.0.1:8848
+  datasource:
+    driver-class-name: com.mysql.cj.jdbc.Driver
+    url: jdbc:mysql://127.0.0.1:3306/tianmu?useUnicode=true&characterEncoding=UTF-8&serverTimezone=Asia/Shanghai
+    username: root
+    password: xxxxx
+  data:
+    redis:
+      database: 15
+      host: 127.0.0.1
+      port: 6380
+      timeout: 50000
+      password: xxxxxx
+      # ?? redis ???
+      lettuce:
+        pool:
+          # ??????????? ??? 0
+          min-idle: 4
+          # ??????????? ??? 8
+          max-idle: 8
+          #???????????? ??? 8
+          max-active: 8
+          #???????????
+          max-wait: 5000ms
+
+minio:
+  url: http://127.0.0.1:9000
+  access-key: ${MINIO_ACCESS_KEY:change-me}
+  secret-key: ${MINIO_SECRET_KEY:change-me}
+  bucket-name: yunying-upload
+
+
+rocketmq:
+  name-server: localhost:9876
+  producer:
+    group: yunying-producer-group
+  consumer:
+    group: yunying-consumer-group
