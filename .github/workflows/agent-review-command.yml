@@ -11,9 +11,7 @@ permissions:
 
 jobs:
   agent-review:
-    if: >
-      github.event.issue.pull_request &&
-      contains(github.event.comment.body, '/agent review')
+    if: ${{ github.event.issue.pull_request && contains(github.event.comment.body, '/agent review') }}
     runs-on: ubuntu-latest
 
     steps:
@@ -23,16 +21,16 @@ jobs:
         with:
           script: |
             const prNumber = context.payload.issue.number;
+
             const { data: pr } = await github.rest.pulls.get({
               owner: context.repo.owner,
               repo: context.repo.repo,
               pull_number: prNumber
             });
 
-            core.setOutput('number', prNumber);
+            core.setOutput('number', String(prNumber));
             core.setOutput('base_sha', pr.base.sha);
             core.setOutput('head_sha', pr.head.sha);
-            core.setOutput('head_ref', pr.head.ref);
 
       - name: Checkout PR branch
         uses: actions/checkout@v4
