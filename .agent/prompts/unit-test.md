@@ -1,4 +1,4 @@
-# Spring Boot 单元测试规范 - Cursor AI 规则
+# Spring Boot 单元测试规范
 
 ## 角色定义
 
