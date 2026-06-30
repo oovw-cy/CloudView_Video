@@ -7,11 +7,11 @@ on:
 permissions:
   contents: read
   issues: write
-  pull-requests: read
+  pull-requests: write
 
 jobs:
   agent-review:
-    if: ${{ github.event.issue.pull_request && contains(github.event.comment.body, '/agent review') }}
+    if: ${{ github.event.issue.pull_request && (contains(github.event.comment.body, '/agent review') || contains(github.event.comment.body, '/agent tests')) }}
     runs-on: ubuntu-latest
 
     steps:
@@ -47,6 +47,7 @@ jobs:
         run: pip install requests
 
       - name: Run AI Code Review
+        if: ${{ contains(github.event.comment.body, '/agent review') }}
         env:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           OPENAI_BASE_URL: ${{ vars.OPENAI_BASE_URL || 'https://api.openai.com/v1' }}
@@ -57,3 +58,16 @@ jobs:
           BASE_SHA: ${{ steps.pr.outputs.base_sha }}
           HEAD_SHA: ${{ steps.pr.outputs.head_sha }}
         run: python scripts/ai_code_review.py
+
+      - name: Run AI Unit Test Suggestion
+        if: ${{ contains(github.event.comment.body, '/agent tests') }}
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          OPENAI_BASE_URL: ${{ vars.OPENAI_BASE_URL || 'https://api.openai.com/v1' }}
+          OPENAI_MODEL: ${{ vars.OPENAI_MODEL || 'gpt-4o-mini' }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          PR_NUMBER: ${{ steps.pr.outputs.number }}
+          BASE_SHA: ${{ steps.pr.outputs.base_sha }}
+          HEAD_SHA: ${{ steps.pr.outputs.head_sha }}
+        run: python scripts/ai_unit_test_suggestion.py

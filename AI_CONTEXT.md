@@ -2,9 +2,6 @@
 
 本项目是 CloudView_Video，一个基于 Spring Boot / Spring Cloud 的视频平台微服务系统。
 
-##背景说明
-- 测试agent-review-command
-
 ## 模块说明
 
 - Common：公共响应、异常处理、JWT 工具、常量、通用模型
