@@ -7,12 +7,12 @@ import com.baomidou.mybatisplus.core.toolkit.StringUtils;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.shanyangcode.common.common.ErrorCode;
 import com.shanyangcode.common.constant.JWTConstant;
+import com.shanyangcode.common.constant.UserConstant;
 import com.shanyangcode.common.exception.BusinessException;
 import com.shanyangcode.common.exception.ThrowUtils;
 import com.shanyangcode.common.utils.JwtUtil;
 import com.shanyangcode.userservice.client.VideoActionServiceClient;
 import com.shanyangcode.userservice.constants.SMSConstant;
-import com.shanyangcode.common.constant.UserConstant;
 import com.shanyangcode.userservice.mapper.UserMapper;
 import com.shanyangcode.userservice.model.dto.LoginCodeRequest;
 import com.shanyangcode.userservice.model.dto.LoginPasswordRequest;
@@ -26,281 +26,253 @@ import com.shanyangcode.userservice.service.UserService;
 import com.shanyangcode.userservice.service.UserStatsService;
 import com.shanyangcode.userservice.utils.RandomCodeUtil;
 import com.shanyangcode.userservice.utils.SendMailUtil;
-import jakarta.annotation.Resource;
 import jakarta.servlet.http.HttpServletRequest;
-import lombok.extern.slf4j.Slf4j;
-import org.springframework.beans.factory.annotation.Autowired;
+import lombok.RequiredArgsConstructor;
+import org.springframework.dao.DuplicateKeyException;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.DigestUtils;
 
+import java.nio.charset.StandardCharsets;
 import java.util.concurrent.TimeUnit;
 
 @Service
-@Slf4j
+@RequiredArgsConstructor
 public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements UserService {
-    @Autowired
-    private StringRedisTemplate stringRedisTemplate;
 
-    @Autowired
-    private UserStatsService userStatsService;
+    private static final String VERIFY_CODE_KEY_PREFIX = "user:verify-code:";
+    private static final String UNSUPPORTED_PHONE_PREFIX = "UNSUPPORTED_PHONE_";
 
-    @Resource
-    private VideoActionServiceClient videoActionServiceClient;
-
-//    @Resource
-//    @Lazy
-//    private FollowService followService;
+    private final StringRedisTemplate stringRedisTemplate;
+    private final UserStatsService userStatsService;
+    private final VideoActionServiceClient videoActionServiceClient;
 
     @Override
     public void sendVerificationCode(String account) {
-        // 检查输入是否为空
-        if (StringUtils.isBlank(account)) {
-            throw new BusinessException(ErrorCode.PHONE_EMAIL_ERROR);
-        }
-        // 生成验证码并发送
-        String code = RandomCodeUtil.generateSixDigitRandomNumber();
-        // 判断账号格式
+        validateVerificationCodeAccount(account);
 
-        if (account.matches(UserConstant.EMAIL_REGEX)) {
-            // 是邮箱 → 发送邮件验证码
-            SendMailUtil.sendEmailCode(account, code);
-        } else if (account.matches(UserConstant.PHONE_REGEX)) {
-            //是手机号 → 抛出异常：本项目不支持手机号注册
-            throw new BusinessException(ErrorCode.PHONE_REGISTRATION_NOT_SUPPORTED);
-        } else {
-            //既不是邮箱也不是手机号 → 抛出格式错误
-            throw new BusinessException(ErrorCode.PHONE_EMAIL_ERROR);
-        }
-        // 保存验证码到 redis, 并设置过期时间
-        stringRedisTemplate.opsForValue().set(account, code, SMSConstant.SMS_EXPIRE_TIME, TimeUnit.MINUTES);
+        String code = RandomCodeUtil.generateSixDigitRandomNumber();
+        SendMailUtil.sendEmailCode(account, code);
+
+        stringRedisTemplate.opsForValue()
+                .set(buildVerifyCodeKey(account), code, SMSConstant.SMS_EXPIRE_TIME, TimeUnit.MINUTES);
     }
 
     @Override
     @Transactional(rollbackFor = Exception.class)
     public LoginResponse register(RegisterRequest registerRequest, HttpServletRequest httpServletRequest) {
-        //1. 参数校验
         validateRegisterRequest(registerRequest);
 
-        //2. 验证码校验
-        validateVerificationCode(registerRequest.getAccount(), registerRequest.getCode());
+        String account = registerRequest.getAccount();
+        validateVerificationCode(account, registerRequest.getCode());
+        checkUserExistence(account);
 
-        //3. 检查用户是否已存在
-        checkUserExistence(registerRequest.getAccount());
-
-        //4. 创建用户
-        User newUser = createUser(registerRequest);
-
-        //5. 保存用户信息(并发安全处理)
-        return saveUserAndGenerateToken(newUser, registerRequest.getAccount());
+        User user = createUser(registerRequest);
+        return saveUserAndBuildLoginResponse(user, account);
     }
 
     @Override
     public LoginResponse loginPassword(LoginPasswordRequest loginPasswordRequest, HttpServletRequest httpServletRequest) {
+        ThrowUtils.throwIf(loginPasswordRequest == null, ErrorCode.PARAMS_ERROR);
+
         String account = loginPasswordRequest.getAccount();
         String password = loginPasswordRequest.getPassword();
 
-        // check account format
         validateAccountFormat(account);
+        ThrowUtils.throwIf(StringUtils.isBlank(password), ErrorCode.LOGIN_ERROR);
 
-        // try to get the current user
         User user = getCurrentUser(account);
+        ThrowUtils.throwIf(!encryptPassword(password).equals(user.getPassword()), ErrorCode.LOGIN_ERROR);
 
-        // check password
-        String encryptedPassword = DigestUtils.md5DigestAsHex((UserConstant.PASSWORD_SALT + password).getBytes());
-        ThrowUtils.throwIf(!encryptedPassword.equals(user.getPassword()), ErrorCode.LOGIN_ERROR);
-
-        // set user
-        LoginResponse loginResponse = new LoginResponse();
-        BeanUtil.copyProperties(user, loginResponse);
-
-        // set user-stats
-        UserStats userStats = userStatsService.getById(user.getUserId());
-        BeanUtil.copyProperties(userStats, loginResponse);
-
-        // generate and store jwt token
-        String token = JwtUtil.generate(user.getUserId().toString()); //每一次登录都生成新的token
-        stringRedisTemplate.opsForValue().set(user.getUserId().toString(), token, JWTConstant.JWT_TIME_OUT, TimeUnit.DAYS);
-
-        loginResponse.setToken(token);
-        return loginResponse;
+        return buildLoginResponse(user);
     }
+
     @Override
     public LoginResponse loginCode(LoginCodeRequest loginCodeRequest, HttpServletRequest httpServletRequest) {
+        ThrowUtils.throwIf(loginCodeRequest == null, ErrorCode.PARAMS_ERROR);
+
         String account = loginCodeRequest.getAccount();
         String code = loginCodeRequest.getCode();
 
-        // check account format
         validateAccountFormat(account);
 
-        // try to get the current user
         User user = getCurrentUser(account);
+        String redisCode = getVerificationCode(account);
+        ThrowUtils.throwIf(StringUtils.isBlank(redisCode) || !redisCode.equals(code), ErrorCode.LOGIN_ERROR_CODE);
 
-        // validate verification code
-        String redisCode = stringRedisTemplate.opsForValue().get(account);
-        ThrowUtils.throwIf(redisCode == null || !redisCode.equals(code), ErrorCode.LOGIN_ERROR_CODE);
-
-        // set user
-        LoginResponse loginResponse = new LoginResponse();
-        BeanUtil.copyProperties(user, loginResponse);
-
-        // set user-stats
-        UserStats userStats = userStatsService.getById(user.getUserId());
-        BeanUtil.copyProperties(userStats, loginResponse);
-
-        // delete verification code stored in redis
-        stringRedisTemplate.delete(account);
-
-        // generate and store jwt token
-        String token = JwtUtil.generate(user.getUserId().toString());
-        stringRedisTemplate.opsForValue().set(user.getUserId().toString(), token, JWTConstant.JWT_TIME_OUT, TimeUnit.DAYS);
-
-        loginResponse.setToken(token);
-        return loginResponse;
+        stringRedisTemplate.delete(buildVerifyCodeKey(account));
+        return buildLoginResponse(user);
     }
 
-    //参数校验
+    @Override
+    public UserInfoResponse getUserInfo(UserInfoRequest userInfoRequest) {
+        ThrowUtils.throwIf(userInfoRequest == null || userInfoRequest.getCreatorId() == null, ErrorCode.PARAMS_ERROR);
+
+        Long creatorId = userInfoRequest.getCreatorId();
+        User user = this.getById(creatorId);
+        ThrowUtils.throwIf(user == null, ErrorCode.USER_NOT_EXISTS);
+
+        UserInfoResponse response = new UserInfoResponse();
+        BeanUtil.copyProperties(user, response);
+        copyUserStats(creatorId, response);
+
+        Long userId = userInfoRequest.getUserId();
+        response.setFollow(userId == null ? 0 : videoActionServiceClient.followType(userId, creatorId));
+        return response;
+    }
+
+    @Override
+    public boolean userLogout(Long userId, HttpServletRequest request) {
+        ThrowUtils.throwIf(userId == null, ErrorCode.PARAMS_ERROR);
+
+        stringRedisTemplate.delete(buildTokenKey(userId));
+        return true;
+    }
+
     private void validateRegisterRequest(RegisterRequest registerRequest) {
+        ThrowUtils.throwIf(registerRequest == null, ErrorCode.PARAMS_ERROR);
+
         String account = registerRequest.getAccount();
-        validateAccountFormat(account);
-        if(StringUtils.isBlank(registerRequest.getPassword())) {
-            throw new BusinessException(ErrorCode.PARAMS_ERROR, "密码不能为空");
+        if (StringUtils.isBlank(account) || !isEmail(account)) {
+            throw new BusinessException(ErrorCode.PHONE_EMAIL_ERROR);
+        }
+        if (StringUtils.isBlank(registerRequest.getPassword())) {
+            throw new BusinessException(ErrorCode.PARAMS_ERROR, "password cannot be blank");
         }
         if (StringUtils.isBlank(registerRequest.getNickname())) {
-            throw new BusinessException(ErrorCode.PARAMS_ERROR, "昵称不能为空");
+            throw new BusinessException(ErrorCode.PARAMS_ERROR, "nickname cannot be blank");
         }
     }
-    /**
-     * 验证码校验
-     */
+
+    private void validateVerificationCodeAccount(String account) {
+        if (StringUtils.isBlank(account)) {
+            throw new BusinessException(ErrorCode.PHONE_EMAIL_ERROR);
+        }
+        if (isPhone(account)) {
+            throw new BusinessException(ErrorCode.PHONE_REGISTRATION_NOT_SUPPORTED);
+        }
+        if (!isEmail(account)) {
+            throw new BusinessException(ErrorCode.PHONE_EMAIL_ERROR);
+        }
+    }
+
     private void validateVerificationCode(String account, String code) {
-        String redisCode = stringRedisTemplate.opsForValue().get(account);
-        if (StringUtils.isBlank(redisCode) || !redisCode.equals(code)) {
+        String redisCode = getVerificationCode(account);
+        if (StringUtils.isBlank(code) || StringUtils.isBlank(redisCode) || !redisCode.equals(code)) {
             throw new BusinessException(ErrorCode.VERIFICATION_CODE_ERROR);
         }
     }
 
-    /**
-     * 检查用户是否已存在
-     */
-    private void checkUserExistence(String account) {
-        LambdaQueryWrapper<User> queryWrapper = new LambdaQueryWrapper<>();
-        if (account.matches(UserConstant.EMAIL_REGEX)) {
-            queryWrapper.eq(User::getEmail, account);
-        }
-        if (this.getOne(queryWrapper) != null) {
-            throw new BusinessException(ErrorCode.USER_ALREADY_EXISTS);
+    private void validateAccountFormat(String account) {
+        if (StringUtils.isBlank(account) || (!isPhone(account) && !isEmail(account))) {
+            throw new BusinessException(ErrorCode.PARAMS_ERROR, "account must be a valid phone number or email");
         }
     }
 
-    /**
-     * 创建用户实体
-     */
+    private void checkUserExistence(String account) {
+        LambdaQueryWrapper<User> queryWrapper = new LambdaQueryWrapper<User>()
+                .eq(User::getEmail, account);
+        ThrowUtils.throwIf(this.count(queryWrapper) > 0, ErrorCode.USER_ALREADY_EXISTS);
+    }
+
     private User createUser(RegisterRequest request) {
+        Long userId = IdUtil.getSnowflake().nextId();
+
         User user = new User();
-        user.setUserId(IdUtil.getSnowflake().nextId());
+        user.setUserId(userId);
         user.setNickname(request.getNickname());
-
-        // 设置账号(手机号或邮箱)
-        if (request.getAccount().matches(UserConstant.EMAIL_REGEX)) {
-            user.setEmail(request.getAccount());
-            //user.setPhone("");
-            user.setPhone("手机号暂未支持使用"+IdUtil.getSnowflake().nextId());//避免多次创建用户时手机号均为""，手机号为唯一索引，此时报错
-        }
-
-        // 密码加密
-        String password = request.getPassword();
-        String encryptedPassword = DigestUtils.md5DigestAsHex((UserConstant.PASSWORD_SALT + password).getBytes());
-        user.setPassword(encryptedPassword);
-
+        user.setEmail(request.getAccount());
+        user.setPhone(UNSUPPORTED_PHONE_PREFIX + userId);
+        user.setPassword(encryptPassword(request.getPassword()));
         return user;
     }
 
-    /**
-     * 保存用户并生成Token(并发安全处理)
-     */
-
-    private LoginResponse saveUserAndGenerateToken(User user, String account) {
-        synchronized (account.intern()) {
-            // 保存用户
-            boolean saveSuccess = this.baseMapper.insert(user) > 0;
-
-            // 初始化用户统计信息
-            UserStats stats = new UserStats();
-            stats.setUserId(user.getUserId());
-            boolean saveStatsSuccess = userStatsService.save(stats);
-
-            if (!saveSuccess || !saveStatsSuccess) {
-                throw new BusinessException(ErrorCode.SYSTEM_ERROR, "用户注册失败");
-            }
-
-            // 清理验证码
-            stringRedisTemplate.delete(account);
-
-            // 生成 Token
-            String token = JwtUtil.generate(user.getUserId().toString());
-            stringRedisTemplate.opsForValue().set(user.getUserId().toString(), token, JWTConstant.JWT_TIME_OUT, TimeUnit.DAYS);
-
-            // 返回用户信息和 Token
-            LoginResponse response = this.baseMapper.getUserInfo(user.getUserId());
-            response.setToken(token);
-            return response;
+    private LoginResponse saveUserAndBuildLoginResponse(User user, String account) {
+        try {
+            boolean saveUserSuccess = this.save(user);
+            boolean saveStatsSuccess = initUserStats(user.getUserId());
+            ThrowUtils.throwIf(!saveUserSuccess || !saveStatsSuccess, ErrorCode.SYSTEM_ERROR);
+        } catch (DuplicateKeyException e) {
+            throw new BusinessException(ErrorCode.USER_ALREADY_EXISTS);
         }
+
+        stringRedisTemplate.delete(buildVerifyCodeKey(account));
+
+        LoginResponse response = this.baseMapper.getUserInfo(user.getUserId());
+        if (response == null) {
+            response = buildLoginResponseWithoutToken(user);
+        }
+        response.setToken(issueToken(user.getUserId()));
+        return response;
     }
 
-    /**
-     * 校验请求参数合法性
-     */
-    private void validateAccountFormat(String account) {
-        if (!account.matches(UserConstant.PHONE_REGEX) && !account.matches(UserConstant.EMAIL_REGEX)) {
-            throw new BusinessException(ErrorCode.PARAMS_ERROR, "账号必须是有效的手机号或邮箱");
-        }
+    private boolean initUserStats(Long userId) {
+        UserStats stats = new UserStats();
+        stats.setUserId(userId);
+        return userStatsService.save(stats);
     }
+
     private User getCurrentUser(String account) {
         LambdaQueryWrapper<User> queryWrapper = new LambdaQueryWrapper<>();
-        if (account.matches(UserConstant.EMAIL_REGEX)) {
+        if (isEmail(account)) {
             queryWrapper.eq(User::getEmail, account);
-        } else if (account.matches(UserConstant.PHONE_REGEX)) {
+        } else {
             queryWrapper.eq(User::getPhone, account);
         }
 
         User user = this.getOne(queryWrapper);
-        if (user == null) {
-            throw new BusinessException(ErrorCode.USER_NOT_EXISTS);
-        }
-
+        ThrowUtils.throwIf(user == null, ErrorCode.USER_NOT_EXISTS);
         return user;
     }
-    //获取用户信息
-    @Override
-    public UserInfoResponse getUserInfo(UserInfoRequest userInfoRequest) {
-        // 查询用户信息判断用户是否存在
-        User user = this.getById(userInfoRequest.getCreatorId());
-        ThrowUtils.throwIf(user == null, ErrorCode.USER_NOT_EXISTS);
 
-        // 用户基本信息
-        UserInfoResponse userInfoResponse = new UserInfoResponse();
-        BeanUtil.copyProperties(user, userInfoResponse);
-
-        // 用户统计信息
-        UserStats userStats = userStatsService.getById(userInfoRequest.getCreatorId());
-        BeanUtil.copyProperties(userStats, userInfoResponse);
-
-        Long userId = userInfoRequest.getUserId();
-        if (userId != null) {
-            // 用户关注状态
-            userInfoResponse.setFollow(videoActionServiceClient.followType(userInfoRequest.getUserId(), userInfoRequest.getCreatorId()));
-        } else {
-            userInfoResponse.setFollow(0);
-        }
-
-        return userInfoResponse;
+    private LoginResponse buildLoginResponse(User user) {
+        LoginResponse response = buildLoginResponseWithoutToken(user);
+        response.setToken(issueToken(user.getUserId()));
+        return response;
     }
-    //用户登出
-    @Override
-    public boolean userLogout(Long userId, HttpServletRequest request) {
-        stringRedisTemplate.delete(userId.toString());
-        return true;
+
+    private LoginResponse buildLoginResponseWithoutToken(User user) {
+        LoginResponse response = new LoginResponse();
+        BeanUtil.copyProperties(user, response);
+        copyUserStats(user.getUserId(), response);
+        return response;
+    }
+
+    private void copyUserStats(Long userId, Object target) {
+        UserStats userStats = userStatsService.getById(userId);
+        if (userStats != null) {
+            BeanUtil.copyProperties(userStats, target);
+        }
+    }
+
+    private String issueToken(Long userId) {
+        String token = JwtUtil.generate(userId.toString());
+        stringRedisTemplate.opsForValue().set(buildTokenKey(userId), token, JWTConstant.JWT_TIME_OUT, TimeUnit.DAYS);
+        return token;
+    }
+
+    private String getVerificationCode(String account) {
+        return stringRedisTemplate.opsForValue().get(buildVerifyCodeKey(account));
+    }
+
+    private String buildVerifyCodeKey(String account) {
+        return VERIFY_CODE_KEY_PREFIX + account;
+    }
+
+    private String buildTokenKey(Long userId) {
+        return userId.toString();
+    }
+
+    private String encryptPassword(String password) {
+        return DigestUtils.md5DigestAsHex((UserConstant.PASSWORD_SALT + password).getBytes(StandardCharsets.UTF_8));
+    }
+
+    private boolean isEmail(String account) {
+        return !StringUtils.isBlank(account) && account.matches(UserConstant.EMAIL_REGEX);
+    }
+
+    private boolean isPhone(String account) {
+        return !StringUtils.isBlank(account) && account.matches(UserConstant.PHONE_REGEX);
     }
 }
