@@ -57,9 +57,9 @@ def call_llm(prompt):
                 {
                     "role": "system",
                     "content": (
-                        "你是一个资深 Java 微服务单元测试设计 Agent。"
-                        "请严格基于项目上下文、单元测试规则和 Git diff 生成测试建议。"
-                        "不要输出 Code Review 报告，不要编造 diff 中不存在的业务。"
+                        "你是一个资深 Java 微服务 PR 摘要 Agent。"
+                        "请严格基于项目上下文、PR 摘要规则和 Git diff 生成评审摘要。"
+                        "不要输出 Code Review 报告，不要输出单元测试建议，不要编造 diff 中不存在的业务。"
                     ),
                 },
                 {
@@ -101,19 +101,19 @@ def post_pr_comment(body):
         raise RuntimeError(f"GitHub comment failed: {response.status_code}\n{response.text}")
 
 
-def build_prompt(project_context, test_prompt, diff, truncated):
+def build_prompt(project_context, summary_prompt, diff, truncated):
     diff_note = ""
     if truncated:
-        diff_note = "\n注意：本次 diff 过长，以下只截取前 60000 个字符，请优先基于已提供内容生成测试建议。\n"
+        diff_note = "\n注意：本次 diff 过长，以下只截取前 60000 个字符，请优先基于已提供内容生成 PR 摘要。\n"
 
     return f"""
 # 项目上下文
 
 {project_context}
 
-# AI 单元测试生成规则
+# AI PR 摘要规则
 
-{test_prompt}
+{summary_prompt}
 
 # 本次 Pull Request Diff
 {diff_note}
@@ -122,35 +122,32 @@ def build_prompt(project_context, test_prompt, diff, truncated):
 {diff}
 ```
 
-请基于以上内容生成一份完整的 AI 单元测试建议报告。
+请基于以上内容生成一份完整的 AI PR 摘要。
 
 必须输出以下结构：
 
-## AI 单元测试建议
+## AI PR 摘要
 
-### 测试目标
-说明本次变更最需要验证的核心行为。
+### 变更目的
+说明本次 PR 想解决什么问题。
 
-### 建议新增或修改的测试类
-按模块列出建议测试类路径。
+### 涉及模块
+列出涉及的模块、包、类和关键文件。
 
-### 重点测试用例
-每个用例请包含：
-- 测试方法名
-- 测试场景
-- 输入数据
-- Mock 依赖
-- 预期结果
-- 覆盖的风险点
+### 核心修改点
+用条目列出主要改动，说明每个改动的作用。
 
-### 边界场景
-列出空值、异常、并发、重复提交、非法参数等测试场景。
+### 影响范围
+说明影响哪些接口、服务、业务流程、数据结构或外部依赖。
 
-### 外部依赖 Mock 建议
-说明 Redis、MySQL、RocketMQ、MinIO、ES、WebSocket 等依赖如何 mock。
+### 潜在风险
+说明本次变更可能带来的风险，例如兼容性、空指针、事务、并发、性能、配置、数据一致性等。
 
-### 覆盖率关注点
-说明哪些分支必须覆盖，哪些模块是高优先级。
+### 建议评审重点
+说明人工 Review 时应该重点检查哪些文件、方法或逻辑。
+
+### 建议验证方式
+说明建议如何验证本次 PR，例如接口测试、单元测试、集成测试、手工验证步骤等。
 """
 
 
@@ -162,18 +159,18 @@ def main():
         raise RuntimeError("BASE_SHA or HEAD_SHA is missing.")
 
     project_context = read_file("AI_CONTEXT.md")
-    test_prompt = read_file(".agent/prompts/unit-test.md")
+    summary_prompt = read_file(".agent/prompts/pr-summary.md")
 
     if not project_context.strip():
         raise RuntimeError("AI_CONTEXT.md is missing or empty.")
 
-    if not test_prompt.strip():
-        raise RuntimeError(".agent/prompts/unit-test.md is missing or empty.")
+    if not summary_prompt.strip():
+        raise RuntimeError(".agent/prompts/pr-summary.md is missing or empty.")
 
     diff = run_git_diff(base_sha, head_sha)
 
     if not diff.strip():
-        post_pr_comment("## AI 单元测试建议\n\n本次 PR 没有检测到代码 diff。")
+        post_pr_comment("## AI PR 摘要\n\n本次 PR 没有检测到代码 diff。")
         return
 
     truncated = False
@@ -181,16 +178,16 @@ def main():
         diff = diff[:MAX_DIFF_CHARS]
         truncated = True
 
-    prompt = build_prompt(project_context, test_prompt, diff, truncated)
-    test_result = call_llm(prompt)
+    prompt = build_prompt(project_context, summary_prompt, diff, truncated)
+    summary_result = call_llm(prompt)
 
-    comment = f"""## AI 单元测试建议
+    comment = f"""## AI PR 摘要
 
-{test_result}
+{summary_result}
 
 ---
 
-本评论由 AI Unit Test Suggestion workflow 自动生成。
+本评论由 AI PR Summary workflow 自动生成。
 """
 
     post_pr_comment(comment)
@@ -200,13 +197,13 @@ if __name__ == "__main__":
     try:
         main()
     except Exception as error:
-        error_message = f"""## AI 单元测试建议执行失败
+        error_message = f"""## AI PR 摘要执行失败
 
 ```text
 {str(error)}
 ```
 
-请检查 GitHub Actions 日志、OPENAI_API_KEY、模型配置、unit-test.md 和 workflow 环境变量。
+请检查 GitHub Actions 日志、OPENAI_API_KEY、模型配置、pr-summary.md 和 workflow 环境变量。
 """
         print(error_message)
         try:
