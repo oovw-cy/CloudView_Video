@@ -21,13 +21,11 @@ jobs:
         with:
           script: |
             const prNumber = context.payload.issue.number;
-
             const { data: pr } = await github.rest.pulls.get({
               owner: context.repo.owner,
               repo: context.repo.repo,
               pull_number: prNumber
             });
-
             core.setOutput('number', String(prNumber));
             core.setOutput('base_sha', pr.base.sha);
             core.setOutput('head_sha', pr.head.sha);
