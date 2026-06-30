@@ -120,3 +120,94 @@ def build_prompt(project_context, summary_prompt, diff, truncated):
 
 ```diff
 {diff}
+```
+
+请基于以上内容生成一份完整的 AI PR 摘要。
+
+必须输出以下结构：
+
+## AI PR 摘要
+
+### 变更目的
+说明本次 PR 想解决什么问题。
+
+### 涉及模块
+列出涉及的模块、包、类和关键文件。
+
+### 核心修改点
+用条目列出主要改动，说明每个改动的作用。
+
+### 影响范围
+说明影响哪些接口、服务、业务流程、数据结构或外部依赖。
+
+### 潜在风险
+说明本次变更可能带来的风险，例如兼容性、空指针、事务、并发、性能、配置、数据一致性等。
+
+### 建议评审重点
+说明人工 Review 时应该重点检查哪些文件、方法或逻辑。
+
+### 建议验证方式
+说明建议如何验证本次 PR，例如接口测试、单元测试、集成测试、手工验证步骤等。
+"""
+
+
+def main():
+    base_sha = os.getenv("BASE_SHA")
+    head_sha = os.getenv("HEAD_SHA")
+
+    if not base_sha or not head_sha:
+        raise RuntimeError("BASE_SHA or HEAD_SHA is missing.")
+
+    project_context = read_file("AI_CONTEXT.md")
+    summary_prompt = read_file(".agent/prompts/pr-summary.md")
+
+    if not project_context.strip():
+        raise RuntimeError("AI_CONTEXT.md is missing or empty.")
+
+    if not summary_prompt.strip():
+        raise RuntimeError(".agent/prompts/pr-summary.md is missing or empty.")
+
+    diff = run_git_diff(base_sha, head_sha)
+
+    if not diff.strip():
+        post_pr_comment("## AI PR 摘要\n\n本次 PR 没有检测到代码 diff。")
+        return
+
+    truncated = False
+    if len(diff) > MAX_DIFF_CHARS:
+        diff = diff[:MAX_DIFF_CHARS]
+        truncated = True
+
+    prompt = build_prompt(project_context, summary_prompt, diff, truncated)
+    summary_result = call_llm(prompt)
+
+    comment = f"""## AI PR 摘要
+
+{summary_result}
+
+---
+
+本评论由 AI PR Summary workflow 自动生成。
+"""
+
+    post_pr_comment(comment)
+
+
+if __name__ == "__main__":
+    try:
+        main()
+    except Exception as error:
+        error_message = f"""## AI PR 摘要执行失败
+
+```text
+{str(error)}
+```
+
+请检查 GitHub Actions 日志、OPENAI_API_KEY、模型配置、pr-summary.md 和 workflow 环境变量。
+"""
+        print(error_message)
+        try:
+            post_pr_comment(error_message)
+        except Exception:
+            pass
+        sys.exit(1)
